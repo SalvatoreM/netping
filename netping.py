@@ -15,15 +15,17 @@ import random
 import smtplib
 from subprocess import Popen,PIPE
 import base64
+import ConfigParser
 #============================================================================
 #============================================================================
 class logger():
-	def __init__(self,logfile):
+	def __init__(self,logfile,logarch):
 		self.reg=False
 		self.report=False
 		self.name=""
 		self.path=""
 		self.records=[]
+		self.arch=logarch
 		filename=string.split(logfile,"/")
 		for f in filename[:-1]:
 			self.path=self.path+f+"/"
@@ -53,7 +55,7 @@ class logger():
 		if (time.strftime("%H") =="00"):
 			if (time.strftime("%M") > "02"):
 				if (not self.reg):
-					os.system ("mv "+self.path+self.name+" "+self.path+time.strftime("%H:%M-%a-%b-%d-%Y")+self.name)
+					os.system ("mv "+self.path+self.name+" "+self.arch+time.strftime("%H:%M-%a-%b-%d-%Y")+self.name)
 					self.reg=True
 		elif (time.strftime("%H:%M") > "00:59"):
 			if (self.reg):
@@ -241,11 +243,13 @@ class NODO():
 		if url[0] == "https:" :
 			opt="--no-check-certificate"
 		url=url[0]+"//"+self.me["ip"]+"/"+url[1]
+		url=self.me["fetch_url"]
 #---------------------------------------------------------------------------------------------------------
 # lettura file remoto
 #---------------------------------------------------------------------------------------------------------
-		log.event_log ("[%s] %s : wget %s %s/ping.csv -O ping%s.csv" % (time.strftime("%c"),self.me["nome"],opt,url,self.me["ip"]))
-		cmd=  "wget -t 1 -T 10 %s %s/ping.csv -O ping%s.csv" % (opt,url,self.me["ip"])
+		log.event_log ("[%s] %s : wget %s/ping.csv -O ping%s.csv" % (time.strftime("%c"),self.me["nome"],url,self.me["ip"]))
+#		cmd=  "wget -t 1 -T 10 %s %s/ping.csv -O ping%s.csv" % (opt,url,self.me["ip"])
+		cmd=  "wget -t 1 -T 10  %s/ping.csv -O ping%s.csv" % (url,self.me["ip"])
 		p = Popen(cmd, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
 		res = p.stdout.read()
 #		r = string.split(res,"\n")
@@ -337,7 +341,7 @@ class NODO():
 #============================================================================
 	def save_data(self,data,debug=0):
 		log.event_log ("[%s] Added record : %s@%s %s\n" %(time.strftime("%c"),self.me["nome"],self.me["ip"],str(data)))
-		t=string.split(time.strftime("%a %b %d %H:%M:%S %Y")," ")
+		t=string.split(time.strftime("%a %m %d %H:%M:%S %Y")," ")
 		giorno=t[2]
 		mese=t[1]
 		anno=t[4]
@@ -688,28 +692,62 @@ class DB :
 #			Fine DB class
 #============================================================================
 #============================================================================
-	
+#============================================================================
+#============================================================================
+#============================================================================
+#============================================================================
+#============================================================================
+#============================================================================
+
 #============================================================================
 # Program Main 
 #============================================================================
-pathnome_log="/home/salvatore/netping/diario.log"
-log=logger(pathnome_log)
+#pathnome_log="/home/salvatore/netping/diario.log"
+#log=logger(pathnome_log)
+#log.event_log ( "[%s] Start net_ping Process\n" % (time.strftime("%c")))
+#DataBaseHost='172.16.1.9'
+#user='ping'
+#password='ping'
+#============================================================================
+# Legge file di configurazione 
+#============================================================================
+c=ConfigParser.ConfigParser()
+if not(c.read("netping.config")): #il file esiste ?
+	print "File Config does not exist"
+	exit(-1)
+sections=c.sections()
+for section in sections:
+	for option in c.options(section):
+#		print option,"="
+		exec  option+"="+'c.get(section,option)'
+#		exec 'print option, "=",c.get(section,option)'
+if not('pathnome_log' in globals()):
+	print "Config File is not correct: 'pathnome_log' not exist"
+	exit(-1)
+elif not ('databasehost' in globals()):
+	print "Config File is not correct: 'datahasehost' not exist"
+	exit(-1)
+elif not ('path_arch' in globals()):
+	print "Config File is not correct: 'path_arc' not exist"
+	exit(-1)
+elif not('user' in globals()):
+	print "Config File is not correct: 'user' not exist"
+	exit(-1)
+elif not('password' in globals()):
+	print "Config File is not correct: 'password' not exist"
+	exit(-1)
+elif not('schemadb' in globals()):
+	print "Config File is not correct : 'schemadb' not exist "
+	exit(-1)
+#============================================================================
+#============================================================================
+log=logger(pathnome_log,path_arch)
 log.event_log ( "[%s] Start net_ping Process\n" % (time.strftime("%c")))
-DataBaseHost='172.16.1.9'
-user='ninux'
-password='ninux'
-ping_db = DB (DataBaseHost,user,password,log) ## Istanzia il Data Base Client
-if ping_db.openDB("net_ping") :               ## Apre la connessione al Data Base
+#============================================================================
+ping_db = DB (databasehost,user,password,log) ## Istanzia il Data Base Client
+if ping_db.openDB(schemadb) :               ## Apre la connessione al Data Base
 	tutti_nodi = ping_db.estrai_record("nodi") # Estrae tutti i nodi
 	ping_db.closeDB()
-#	for s in tutti_nodi:
-#		print s
-#		cmd = "ping -c 1 %s " % s["ip"]
-#		p = Popen(cmd, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
-#		res = p.stdout.read()
-#		for r in string.split(res,"\n") :
-#			if r.find("1 received") <> -1:
-#				print "Ricevuto ping da  %s : Nodo Attivo"% s["ip"]
 i=0
 id_max=0
 for s in tutti_nodi:
@@ -738,8 +776,10 @@ while 1:
 			nuovi_nodi = ping_db.estrai_record("nodi","*","ID > %s" %id_max) # Estrae  i nodi nuovi
 			ping_db.closeDB()
 			for s in nuovi_nodi:
+				if s["ID"] > id_max :
+					id_max=s["ID"]
 				tutti_nodi.append(NODO(s,log))
-				log_enet("Aggiunto nodo %s@%s" %(s["nome"],s["ip"]))
+				log.event_log("[%s] Aggiunto nodo %s@%s" %(time.strftime("%c"),s["nome"],s["ip"]))
 				log.event_log("[%s] %s %s %s %s %s %d\n" %(time.strftime("%c"),s["nome"],s["ip"],s["contattomail"]," - ","attivo = ",s["attivo"]))
 #		elif (n-len(tutti_nodi))==0:
 #			print "Nessun nodo aggiunto"
